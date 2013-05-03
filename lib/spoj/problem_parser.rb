@@ -1,6 +1,12 @@
 require 'nokogiri'
-require 'open-uri'
+require 'httparty'
+require 'sanitize'
+
+require 'active_support/lazy_load_hooks'
+require 'active_support/i18n'
 require 'active_support/core_ext/string'
+
+
 
 module Spoj
   class ProblemParser
@@ -16,7 +22,9 @@ module Spoj
           :info => {}
       }
       url = "http://www.spoj.com/problems/#{code}"
-      doc = Nokogiri::HTML(open(url))
+      response = HTTParty.get(url)
+
+      doc = Nokogiri::HTML(response.body)
 
       # name and number
       meta = doc.xpath("//meta[@content='spoj-pl:problem']").first
@@ -32,32 +40,19 @@ module Spoj
       res[:name] = $2
 
       # content, input, output
-      p = doc.xpath("//p[@align='justify']").first
+      response.body =~ /<p align="justify">(.*?(?=<h3>))(<h3>Input<\/h3>(.*)<h3>Output<\/h3>(.*))?<h3>Example<\/h3>\s+<pre>(.*)<\/pre>(.*)<hr>/m
 
-      state = :content
-
-      sibling = p.next_sibling
-      while (!sibling.nil? && sibling.name != 'hr') do
-        if sibling.name == 'h3'
-          state = :input if sibling.content =~ /Input/
-          state = :output if sibling.content =~ /Output/
-          state = :raw_example if sibling.content =~ /Example/
-          sibling = sibling.next_sibling
-          next
-        end
-        res[state.to_sym] += sibling.to_s
-        sibling = sibling.next_sibling
-      end
-
-      res[:content] = cleanup_text res[:content]
-      res[:input] = cleanup_text res[:input]
-      res[:output] = cleanup_text res[:output]
+      res[:content] = cleanup_text $1
+      res[:input] = cleanup_text $3
+      res[:output] = cleanup_text $4
+      res[:raw_example] = $5
+      res[:note] = cleanup_text $6
 
       # example
       return res if res[:raw_example].empty?
 
-      res[:raw_example] =~ /<pre>(<strong>.*Input.*<\/strong>\s*)(.*)\n(<strong>.*Output.*<\/strong>\s*)(.*)<\/pre>/m
-      res[:examples] << {:input => $2, :output => $4 }
+      res[:raw_example] =~ /(<(b|strong)>.*Input.*<\/(b|strong)>\s*)(.*)\n(<(b|strong)>.*Output.*<\/(b|strong)>\s*)(.*)/m
+      res[:examples] << {:input => $4, :output => $8 }
 
       # info
       doc.xpath("//table[@class='probleminfo']/tr").each do |tr|
@@ -72,9 +67,35 @@ module Spoj
     end
 
     def cleanup_text (text)
-      text = Nokogiri::XML::DocumentFragment.parse(text).content
+      #doc = Nokogiri::HTML::DocumentFragment.parse text
+      #e = doc.errors
+      #text = Sanitize.clean text
+      text = '' if text.nil?
+
+      %w[p b strong em br img].each do |tag|
+        text = strip_tag text, tag
+      end
+
+      %w[&nbsp;].each do |bad|
+        text = text.gsub bad, ''
+      end
+
       text = text.split("\n").each {|line| line.strip! }.select {|line| !line.blank?}.join(' ')
       text
+    end
+
+    def strip_tag (text, tag)
+      text = strip_open_tag text, tag
+      text = strip_close_tag text, tag
+      text
+    end
+
+    def strip_open_tag (text, tag)
+      text.gsub /<\s*#{tag}.*?>/m, ''
+    end
+
+    def strip_close_tag (text, tag)
+      text.gsub /<\s*\/\s*#{tag}\s*.*?>/m, ''
     end
 
   end

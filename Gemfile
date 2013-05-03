@@ -1,7 +1,10 @@
-source 'https://rubygems.org'
+source 'http://rubygems.org'
 
-group :test do
+gem 'rspec', :require => false
+
+group :development, :test do
   gem 'webmock'
+  gem 'rake'
 end
 
 # Specify your gem's dependencies in code_assistant.gemspec
